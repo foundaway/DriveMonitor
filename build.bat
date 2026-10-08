@@ -6,6 +6,7 @@ python -m pip install --upgrade pip || goto :error
 python -m pip install -r requirements-dev.txt || goto :error
 python -m pytest -q || goto :error
 python -m PyInstaller --noconfirm --clean --onefile --windowed --name DriveMonitor ^
+  --icon assets\drivemonitor.ico --add-data "assets\drivemonitor.png;assets" ^
   --exclude-module pyqtgraph.examples ^
   --collect-data tzdata --hidden-import tzdata ^
   run_drivemonitor.py || goto :error

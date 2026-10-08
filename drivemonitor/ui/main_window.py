@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import sys
 import time
+from pathlib import Path
 
 from PyQt6.QtCore import QSize, Qt, QTimer
 from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
@@ -24,7 +26,24 @@ log = logging.getLogger(__name__)
 LEVEL_COLORS = {"error": theme.BAD, "warning": theme.WARN, "info": theme.OK}
 
 
+def resource_path(rel: str) -> Path:
+    """Ruta a un archivo de assets/, tanto desde el código como dentro del .exe."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
+    return base / rel
+
+
+def app_icon() -> QIcon:
+    path = resource_path("assets/drivemonitor.png")
+    if path.exists():
+        icon = QIcon(str(path))
+        if not icon.isNull():
+            return icon
+    log.warning("No se encontró el icono %s; se usa el de respaldo", path)
+    return make_icon()
+
+
 def make_icon(c: str = theme.ACCENT) -> QIcon:
+    """Icono de respaldo si no se encuentra assets/drivemonitor.png."""
     pm = QPixmap(64, 64)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
@@ -47,7 +66,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.db, self.settings = db, settings
         self.setWindowTitle(f"{APP_NAME} · Kinetix 5500 (solo lectura)")
-        self.setWindowIcon(make_icon())
+        self.setWindowIcon(app_icon())
         self.resize(1360, 860)
 
         self.manager = PollerManager(db, settings)
@@ -92,7 +111,7 @@ class MainWindow(QMainWindow):
         self.alerts_dock = dock
         dock.setMaximumHeight(170)
 
-        self.tray = QSystemTrayIcon(make_icon(), self)
+        self.tray = QSystemTrayIcon(app_icon(), self)
         self.tray.setToolTip(APP_NAME)
         if QSystemTrayIcon.isSystemTrayAvailable():
             self.tray.show()

@@ -99,6 +99,7 @@ Es equivalente a:
 ```bat
 python -m pip install -r requirements-dev.txt
 python -m PyInstaller --noconfirm --clean --onefile --windowed --name DriveMonitor ^
+  --icon assets\drivemonitor.ico --add-data "assets\drivemonitor.png;assets" ^
   --exclude-module pyqtgraph.examples --collect-data tzdata --hidden-import tzdata ^
   run_drivemonitor.py
 ```
@@ -185,6 +186,8 @@ drivemonitor/
   config.py         páginas, intervalos y settings.json
   ui/               interfaz PyQt6 + pyqtgraph
 tools/capture_drive.py   visor/captura de descubrimiento del paso 1 (solo stdlib)
+tools/make_icon.py       genera assets/drivemonitor.ico (requiere Pillow)
+assets/                  icono de la aplicación
 tests/                   pruebas (pytest) y drive simulado
 ```
 
