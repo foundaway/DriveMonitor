@@ -5,8 +5,9 @@ from __future__ import annotations
 import ipaddress
 import re
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-                             QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox,
+                             QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSpinBox, QTabWidget,
                              QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..config import MIN_INTERVAL_S, PAGES, Settings
@@ -60,8 +61,15 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.settings = settings
         self.setWindowTitle("Configuración")
-        self.resize(640, 640)
+        self.resize(640, 560)
+        self.setMinimumSize(420, 320)
         lay = QVBoxLayout(self)
+        # Pestañas con desplazamiento: el diálogo funciona aunque la ventana sea chica.
+        self.tabs = QTabWidget()
+        lay.addWidget(self.tabs, 1)
+        page_poll = self._page("Consulta")
+        page_shift = self._page("Turnos y otros")
+        page_url = self._page("URL manual")
 
         g = QGroupBox("Intervalos de consulta (segundos)")
         f = QFormLayout(g)
@@ -72,7 +80,7 @@ class SettingsDialog(QDialog):
             note = "  (se registra solo si cambia)" if p.mode == "on_change" else ""
             f.addRow(f"{p.label}{note}:", sb)
             self.intervals[p.key] = sb
-        lay.addWidget(g)
+        page_poll.addWidget(g)
 
         g2 = QGroupBox("Comunicación")
         f2 = QFormLayout(g2)
@@ -85,7 +93,7 @@ class SettingsDialog(QDialog):
         f2.addRow("Timeout por petición:", self.timeout)
         f2.addRow("Pausa mínima entre peticiones:", self.gap)
         f2.addRow("Espera máxima al reintentar:", self.backoff)
-        lay.addWidget(g2)
+        page_poll.addWidget(g2)
 
         g3 = QGroupBox("Turnos (hora local de inicio)")
         v3 = QVBoxLayout(g3)
@@ -105,7 +113,7 @@ class SettingsDialog(QDialog):
         hb.addStretch(1)
         v3.addWidget(self.shifts)
         v3.addLayout(hb)
-        lay.addWidget(g3)
+        page_shift.addWidget(g3)
 
         g4 = QGroupBox("Otros")
         f4 = QFormLayout(g4)
@@ -116,7 +124,7 @@ class SettingsDialog(QDialog):
         self.notify.setChecked(bool(settings.data.get("notifications", True)))
         f4.addRow("Guardar Monitor Signals:", self.retention)
         f4.addRow(self.notify)
-        lay.addWidget(g4)
+        page_shift.addWidget(g4)
 
         g5 = QGroupBox("URL manual de una página (solo si el menú del drive no la muestra)")
         f5 = QFormLayout(g5)
@@ -136,7 +144,10 @@ class SettingsDialog(QDialog):
         f5.addRow("URL:", self.ov_url)
         if not drives:
             g5.setEnabled(False)
-        lay.addWidget(g5)
+        page_url.addWidget(g5)
+        page_url.addWidget(QLabel("Normalmente no hace falta: la app busca cada página en el menú del drive. "
+                                  "Úsalo solo si en Detalle → Eventos falta alguna página.", objectName="muted",
+                                  wordWrap=True))
         self._load_ov()
 
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
@@ -145,6 +156,16 @@ class SettingsDialog(QDialog):
         bb.accepted.connect(self._save)
         bb.rejected.connect(self.reject)
         lay.addWidget(bb)
+
+    def _page(self, title: str) -> QVBoxLayout:
+        inner = QWidget()
+        v = QVBoxLayout(inner)
+        v.setAlignment(Qt.AlignmentFlag.AlignTop)
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setWidget(inner)
+        self.tabs.addTab(area, title)
+        return v
 
     def _add_shift(self, name: str, start: str) -> None:
         r = self.shifts.rowCount()
