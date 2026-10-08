@@ -81,15 +81,24 @@ python run_drivemonitor.py
 build.bat
 ```
 
-El script instala las dependencias, corre las pruebas y genera
-**`dist\DriveMonitor\DriveMonitor.exe`**. Para usarlo en otra PC, copia la carpeta
-`dist\DriveMonitor` completa; no hace falta instalar Python.
+El script instala las dependencias, corre las pruebas y genera **un solo archivo**:
+**`dist\DriveMonitor.exe`**. Es lo único que hay que conservar o copiar a otra PC;
+no necesita Python instalado ni otros archivos junto a él. Al terminar, `build.bat`
+borra la carpeta temporal `build\` (ahí quedan archivos intermedios como
+`PYZ-00.pyz` que no se usan).
+
+Notas del modo de un solo archivo:
+
+- Al abrirse, el .exe se descomprime en una carpeta temporal de Windows; por eso
+  tarda unos segundos más en arrancar, y Windows borra esa carpeta al cerrar.
+- Algunos antivirus corporativos revisan con más cuidado los .exe de PyInstaller.
+  Si lo bloquean, hay que pedir a TI que lo autoricen.
 
 Es equivalente a:
 
 ```bat
 python -m pip install -r requirements-dev.txt
-python -m PyInstaller --noconfirm --clean --windowed --name DriveMonitor ^
+python -m PyInstaller --noconfirm --clean --onefile --windowed --name DriveMonitor ^
   --exclude-module pyqtgraph.examples --collect-data tzdata --hidden-import tzdata ^
   run_drivemonitor.py
 ```
