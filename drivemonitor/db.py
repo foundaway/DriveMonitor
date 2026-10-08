@@ -327,3 +327,19 @@ class Database:
         with self.tx() as c:
             c.execute("INSERT INTO parse_errors(drive_id, page, url, ts, error, excerpt) VALUES (?,?,?,?,?,?)",
                       (drive_id, page, url, time.time(), error, excerpt[:2000]))
+
+    def parse_errors(self, drive_id: int, limit: int = 500) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT ts, page, url, error FROM parse_errors WHERE drive_id=? "
+                                 "ORDER BY ts DESC LIMIT ?", (drive_id, limit)).fetchall()
+
+    def last_fault(self, drive_id: int) -> sqlite3.Row | None:
+        r = self.faults(drive_id)
+        return r[0] if r else None
+
+    def fault_count_since(self, drive_id: int, t0: float) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM faults WHERE drive_id=? AND "
+                                 "COALESCE(cip_time_utc, first_seen_utc) >= ?", (drive_id, t0)).fetchone()[0]
+
+    def last_sample_ts(self, drive_id: int) -> float | None:
+        r = self.conn.execute("SELECT MAX(ts) FROM samples WHERE drive_id=?", (drive_id,)).fetchone()
+        return r[0] if r else None

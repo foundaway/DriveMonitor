@@ -68,9 +68,10 @@ def test_kv_keeps_everything_and_dedups_keys():
 
 
 def test_xml_and_json():
-    xml = b"<?xml version='1.0'?><signals><sig name='vel'>1500.2</sig></signals>"
+    xml = (b"<?xml version='1.0'?><signals><sig name='vel' unit='rpm'>1500.2</sig>"
+           b"<bus>650</bus><meta rev='2'/></signals>")
     assert rows_to_kv(extract_rows("d.xml", xml, "text/xml")) == [
-        ("signals/sig@name", "vel"), ("signals/sig", "1500.2")]
+        ("vel", "1500.2"), ("vel@unit", "rpm"), ("signals/bus", "650"), ("signals/meta@rev", "2")]
     assert rows_to_kv(extract_rows("d.json", b'{"a": {"b": 1}}', "application/json")) == [("a.b", "1")]
 
 

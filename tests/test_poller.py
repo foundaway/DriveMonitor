@@ -84,7 +84,7 @@ def test_full_cycle(setup):
     # Encoder y señales se guardan como muestras clave/valor.
     assert wait_for(lambda: db.latest_values(drive_id, "encoder").get("RSSI (%)"))
     assert db.latest_values(drive_id, "encoder")["RSSI (%)"][2] == 100.0
-    assert "signals/sig@name" in db.latest_values(drive_id, "monitor")
+    assert db.latest_values(drive_id, "monitor")["Velocity Feedback"][2] == 1500.0
 
     # RSSI baja de 100 % -> evento y alerta (una sola vez mientras siga bajo).
     with mock.lock:

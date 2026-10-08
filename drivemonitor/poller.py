@@ -313,7 +313,7 @@ class DrivePoller(threading.Thread):
         if not baseline_done:
             self.db.set_state(self.drive.id, "faultlog_baseline", "1")
             if new:
-                self.event("faultlog_initial", f"Fault Log inicial: {len(new)} fallas registradas", level="info")
+                self.event("faultlog_initial", f"Fault Log inicial: {len(new)} " + ("falla registrada" if len(new) == 1 else "fallas registradas"), level="info")
             self.emit("faults", new=len(new), initial=True)
             return
         for rec in new:

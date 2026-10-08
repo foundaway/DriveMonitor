@@ -178,10 +178,20 @@ def extract_rows(url: str, body: bytes, content_type: str = "") -> list[Row]:
             def walk(el, path):
                 tag = el.tag.split("}")[-1]
                 p = f"{path}/{tag}" if path else tag
-                for k, v in el.attrib.items():
-                    rows.append(Row([f"{p}@{k}", v], source="xml"))
-                if el.text and el.text.strip():
-                    rows.append(Row([p, " ".join(el.text.split())], source="xml"))
+                text = " ".join((el.text or "").split())
+                # <sig name="Velocity">1500</sig> -> clave = nombre del elemento
+                name_attr = next((a for a in ("name", "label", "id", "key") if el.attrib.get(a)), None)
+                if text and name_attr:
+                    label = el.attrib[name_attr]
+                    rows.append(Row([label, text], source="xml"))
+                    for k, v in el.attrib.items():
+                        if k != name_attr:
+                            rows.append(Row([f"{label}@{k}", v], source="xml"))
+                else:
+                    for k, v in el.attrib.items():
+                        rows.append(Row([f"{p}@{k}", v], source="xml"))
+                    if text:
+                        rows.append(Row([p, text], source="xml"))
                 for ch in el:
                     walk(ch, p)
 
