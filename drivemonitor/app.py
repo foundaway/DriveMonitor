@@ -56,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(argv if argv is not None else sys.argv)
     app.setApplicationName(APP_NAME)
     _load_spanish(app)
+    from .ui.main_window import app_icon
+    app.setWindowIcon(app_icon())
     app.setQuitOnLastWindowClosed(True)
     theme.apply(app)
     settings = Settings()
