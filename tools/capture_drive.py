@@ -36,6 +36,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 
+DEFAULT_HOST = "172.23.22.95"
 USER_AGENT = "DriveMonitor-Discovery/0.1 (read-only)"
 
 # Palabras que, si aparecen en la ruta, hacen que la URL NO se consulte.
@@ -133,7 +134,7 @@ def extract_links(url: str, body: bytes, ctype: str) -> tuple[list[tuple[str, st
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("host", help="IP del drive, p. ej. 172.23.22.95")
+    ap.add_argument("host", nargs="?", help="IP del drive, p. ej. 172.23.22.95 (si falta, se pregunta)")
     ap.add_argument("--out", default="tests/fixtures/raw", help="carpeta de salida")
     ap.add_argument("--delay", type=float, default=1.0, help="segundos entre peticiones (mín. 0.5)")
     ap.add_argument("--timeout", type=float, default=5.0, help="timeout por petición (s)")
@@ -143,6 +144,8 @@ def main() -> int:
     ap.add_argument("--sample-gap", type=float, default=3.0,
                     help="segundos entre capturas extra de la misma página")
     args = ap.parse_args()
+    if not args.host:
+        args.host = input(f"IP del drive [{DEFAULT_HOST}]: ").strip() or DEFAULT_HOST
     delay = max(0.5, args.delay)
 
     root = f"http://{args.host}/"
@@ -239,5 +242,25 @@ def main() -> int:
     return 0
 
 
+def run() -> int:
+    # Con doble clic (sin argumentos) la consola se cerraría al terminar o al
+    # fallar; en ese caso se muestra el error y se espera Enter.
+    interactive = len(sys.argv) == 1
+    code = 1
+    try:
+        code = main()
+    except KeyboardInterrupt:
+        print("\nCancelado por el usuario.")
+    except Exception:  # noqa: BLE001 - mostrar el error antes de cerrar
+        import traceback
+        traceback.print_exc()
+    if interactive:
+        try:
+            input("\nPresiona Enter para cerrar...")
+        except EOFError:
+            pass
+    return code
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())
