@@ -88,8 +88,8 @@ def _merge(base: dict, extra: dict) -> dict:
 
 
 class Settings:
-    def __init__(self, path: Path | None = None) -> None:
-        self.path = path or data_dir() / "settings.json"
+    def __init__(self, path: str | Path | None = None) -> None:
+        self.path = Path(path) if path else data_dir() / "settings.json"
         self.data = copy.deepcopy(DEFAULT_SETTINGS)
         self.load()
 

@@ -356,7 +356,8 @@ class TrendsTab(QWidget):
         self.plot.getPlotItem().setDownsampling(auto=True, mode="peak")
         self.plot.getPlotItem().setClipToView(True)
         right.addWidget(self.plot, 1)
-        hint = QLabel("Rueda del mouse: zoom · arrastrar: mover · clic derecho: opciones y ver todo", objectName="muted")
+        hint = QLabel("Rueda del mouse: zoom · arrastrar: mover · clic derecho: ver todo. "
+                     "Para hacer zoom sin que se reinicie, desmarca «Actualizar en vivo».", objectName="muted")
         right.addWidget(hint)
         lay.addLayout(right, 1)
 

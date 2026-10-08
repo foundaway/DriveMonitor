@@ -22,6 +22,7 @@ class PollerManager(QObject):
         self.db = db
         self.settings = settings
         self.pollers: dict[int, DrivePoller] = {}
+        self._stopping: dict[int, DrivePoller] = {}
         self.status: dict[int, tuple[str, str]] = {}
 
     def _emit(self, kind: str, payload: dict) -> None:
@@ -36,6 +37,9 @@ class PollerManager(QObject):
     def start(self, drive_id: int) -> None:
         if self.is_running(drive_id):
             return
+        old = self._stopping.pop(drive_id, None)
+        if old is not None:
+            old.join(10)  # nunca dos hilos (dos conexiones) sobre el mismo drive
         row = self.db.drive(drive_id)
         if row is None:
             return
@@ -48,6 +52,7 @@ class PollerManager(QObject):
         p = self.pollers.pop(drive_id, None)
         if p:
             p.stop()
+            self._stopping[drive_id] = p
         if remember:
             self.db.update_drive(drive_id, enabled=False)
         self.status[drive_id] = ("stopped", "Detenido")
@@ -66,7 +71,8 @@ class PollerManager(QObject):
                 self.start(r["id"])
 
     def stop_all(self, timeout: float = 8.0) -> None:
-        pollers = list(self.pollers.values())
+        pollers = list(self.pollers.values()) + list(self._stopping.values())
+        self._stopping.clear()
         for p in pollers:
             p.stop()
         for p in pollers:
