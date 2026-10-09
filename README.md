@@ -120,8 +120,12 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed --name DriveMonit
    - los turnos (hora de inicio de cada uno);
    - cuántos días guardar Monitor Signals;
    - las notificaciones;
+   - el cierre automático por inactividad (por defecto 30 min; 0 = nunca);
    - la URL manual de una página (ver abajo).
-6. Las alertas aparecen en el panel **Alertas** (doble clic abre el drive) y como
+6. **Cierre por inactividad**: si nadie usa la app (mouse o teclado) durante el
+   tiempo configurado, aparece un aviso con cuenta regresiva de 60 s. Si nadie lo
+   cancela, la app detiene todas las consultas y se cierra.
+7. Las alertas aparecen en el panel **Alertas** (doble clic abre el drive) y como
    notificación de Windows.
 
 ### Dónde se guardan los datos

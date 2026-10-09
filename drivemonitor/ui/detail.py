@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import datetime
 
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import QDateTime, Qt, pyqtSignal
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDateTimeEdit, QHBoxLayout, QLabel, QListWidget,
-                             QListWidgetItem, QPushButton, QSplitter, QTabWidget, QVBoxLayout, QWidget)
+                             QListWidgetItem, QPushButton, QScrollArea, QSplitter, QTabWidget, QVBoxLayout, QWidget)
 
 from .. import analysis
 from ..analysis import LOCAL_TZ, FaultPoint
@@ -19,7 +21,7 @@ from ..db import Database
 from ..parsers import format_duration
 from ..poller import NET_ERROR_RE, QUALITY_RE, RSSI_RE
 from . import theme
-from .widgets import DataTable, color, do_export, time_plot
+from .widgets import DataTable, LocalDateAxis, color, do_export, time_plot
 
 log = logging.getLogger(__name__)
 
@@ -321,6 +323,10 @@ class FaultsTab(QWidget):
 # --------------------------------------------------------------------------
 class TrendsTab(QWidget):
     DEFAULTS = {"encoder": ("temperature", "voltage", "rssi", "quality")}
+    # Datos fijos (identificadores, versiones): no tiene sentido graficarlos por defecto.
+    IDENT_RE = re.compile(r"serial|resolution|revolution|fw[\s_]*rev|firmware|revision|connection|"
+                          r"catalog|model|address|mask|gateway|(?<![a-z])id(?![a-z])", re.I)
+    ROW_HEIGHT = 170
 
     def __init__(self, db: Database, drive_id: int) -> None:
         super().__init__()
@@ -335,6 +341,10 @@ class TrendsTab(QWidget):
         side.addWidget(QLabel("Señales (marca las que quieras ver)"))
         self.keys = QListWidget()
         side.addWidget(self.keys, 1)
+        self.split = QCheckBox("Una gráfica por señal")
+        self.split.setChecked(True)
+        self.split.setToolTip("Cada señal con su propia escala; el eje de tiempo se mueve junto.")
+        side.addWidget(self.split)
         self.live = QCheckBox("Actualizar en vivo")
         self.live.setChecked(True)
         side.addWidget(self.live)
@@ -352,33 +362,48 @@ class TrendsTab(QWidget):
         top.addWidget(self.range)
         top.addStretch(1)
         right.addLayout(top)
-        self.plot = time_plot()
-        self.plot.getPlotItem().setDownsampling(auto=True, mode="peak")
-        self.plot.getPlotItem().setClipToView(True)
-        right.addWidget(self.plot, 1)
+        self.canvas = pg.GraphicsLayoutWidget()
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setWidget(self.canvas)
+        right.addWidget(self.scroll, 1)
+        self.info = QLabel("", objectName="muted")
+        right.addWidget(self.info)
         hint = QLabel("Rueda del mouse: zoom · arrastrar: mover · clic derecho: ver todo. "
-                     "Para hacer zoom sin que se reinicie, desmarca «Actualizar en vivo».", objectName="muted")
+                      "Para hacer zoom sin que se reinicie, desmarca «Actualizar en vivo».", objectName="muted")
         right.addWidget(hint)
         lay.addLayout(right, 1)
 
+        self._plots: list[pg.PlotItem] = []
         self._checked: dict[str, set[str]] = {}
         self.page.currentIndexChanged.connect(self._load_keys)
         self.keys.itemChanged.connect(self._key_toggled)
         self.range.changed.connect(self.refresh)
+        self.split.toggled.connect(self.refresh)
+
+    def _default_keys(self, page: str, keys: list[str]) -> set[str]:
+        pats = self.DEFAULTS.get(page)
+        if pats:
+            chosen = {k for k in keys if any(p in k.lower() for p in pats) and not self.IDENT_RE.search(k)}
+            if chosen:
+                return chosen
+        return set([k for k in keys if not self.IDENT_RE.search(k)][:4])
 
     def _load_keys(self) -> None:
         page = self.page.currentData()
         keys = self.db.sample_keys(self.drive_id, page, numeric_only=True)
-        if page not in self._checked:
-            pats = self.DEFAULTS.get(page)
-            self._checked[page] = ({k for k in keys if any(p in k.lower() for p in pats)} if pats
-                                   else set(keys[:4]))
+        if page not in self._checked and keys:
+            self._checked[page] = self._default_keys(page, keys)
+        checked = self._checked.get(page, set())
         self.keys.blockSignals(True)
         self.keys.clear()
         for k in keys:
             it = QListWidgetItem(k)
             it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            it.setCheckState(Qt.CheckState.Checked if k in self._checked[page] else Qt.CheckState.Unchecked)
+            it.setCheckState(Qt.CheckState.Checked if k in checked else Qt.CheckState.Unchecked)
+            if self.IDENT_RE.search(k):
+                it.setForeground(QColor(theme.MUTED))
+                it.setToolTip("Dato fijo (identificador o versión)")
             self.keys.addItem(it)
         self.keys.blockSignals(False)
         self.refresh()
@@ -392,24 +417,62 @@ class TrendsTab(QWidget):
         return [self.keys.item(i).text() for i in range(self.keys.count())
                 if self.keys.item(i).checkState() == Qt.CheckState.Checked]
 
+    def _new_plot(self, row: int, title: str | None) -> pg.PlotItem:
+        p = self.canvas.addPlot(row=row, col=0, axisItems={"bottom": LocalDateAxis(orientation="bottom")})
+        p.showGrid(x=True, y=True, alpha=0.15)
+        p.setDownsampling(auto=True, mode="peak")
+        p.setClipToView(True)
+        if title:
+            p.setTitle(title, size="9pt", color=theme.FG)
+        if self._plots:
+            p.setXLink(self._plots[0])
+        self._plots.append(p)
+        return p
+
     def refresh(self) -> None:
         if self.keys.count() == 0:
             self._load_keys_once()
         page = self.page.currentData()
         t0, t1 = self.range.range()
-        vr = self.plot.getPlotItem().vb.viewRange()
-        keep_zoom = not self.live.isChecked() and getattr(self, "_drawn", False)
-        self.plot.clear()
-        self.plot.getPlotItem().legend.clear() if self.plot.getPlotItem().legend else None
-        for i, k in enumerate(self.selected_keys()):
+        keep_zoom = not self.live.isChecked() and bool(self._plots)
+        old_x = self._plots[0].vb.viewRange()[0] if keep_zoom else None
+        self.canvas.clear()
+        self._plots = []
+        keys = self.selected_keys()
+        series = []
+        for k in keys:
             pts = [(ts, v) for ts, v, _ in self.db.series(self.drive_id, page, k, t0, t1) if v is not None]
-            if pts:
+            series.append((k, pts))
+        with_data = [(k, pts) for k, pts in series if pts]
+        if self.split.isChecked():
+            for i, (k, pts) in enumerate(with_data):
+                p = self._new_plot(i, k)
                 xs, ys = zip(*pts)
-                self.plot.plot(xs, ys, pen=pg.mkPen(color(i), width=2), name=k)
-        if keep_zoom:
-            self.plot.setRange(xRange=vr[0], yRange=vr[1], padding=0)
+                p.plot(xs, ys, pen=pg.mkPen(color(i), width=2), symbol="o" if len(pts) < 60 else None,
+                       symbolSize=4, symbolBrush=color(i))
+                last = ys[-1]
+                p.setTitle(f"{k} &nbsp; <b>{last:g}</b>", size="9pt", color=theme.FG)
+                if min(ys) == max(ys):  # valor constante: margen para que se vea la línea
+                    pad = abs(last) * 0.05 or 1
+                    p.setYRange(last - pad, last + pad, padding=0)
+            self.canvas.setMinimumHeight(max(1, len(with_data)) * self.ROW_HEIGHT)
         else:
-            self.plot.enableAutoRange()
+            p = self._new_plot(0, None)
+            p.addLegend(offset=(10, 10))
+            for i, (k, pts) in enumerate(with_data):
+                xs, ys = zip(*pts)
+                p.plot(xs, ys, pen=pg.mkPen(color(i), width=2), name=k)
+            self.canvas.setMinimumHeight(0)
+        if old_x is not None and self._plots:
+            self._plots[0].setXRange(*old_x, padding=0)
+        empty = [k for k, pts in series if not pts]
+        if not keys:
+            self.info.setText("Marca una o más señales a la izquierda.")
+        elif not with_data:
+            self.info.setText("No hay lecturas de esas señales en el rango elegido.")
+        else:
+            n = sum(len(pts) for _, pts in with_data)
+            self.info.setText(f"{n} lecturas en el rango." + (f" Sin datos: {', '.join(empty)}" if empty else ""))
         self._drawn = True
 
     def _load_keys_once(self) -> None:

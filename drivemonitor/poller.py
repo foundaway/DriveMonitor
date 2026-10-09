@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 import threading
@@ -29,13 +30,32 @@ from .parsers import extract_rows, parse_duration, parse_fault_rows, parse_numbe
 
 log = logging.getLogger(__name__)
 
-RSSI_RE = re.compile(r"\brssi\b", re.I)
+# Los nombres reales vienen pegados (EncData/EncRSSI, HF2DSLfwrev), por eso no
+# se usan límites de palabra en RSSI/Quality/firmware.
+RSSI_RE = re.compile(r"rssi", re.I)
 QUALITY_RE = re.compile(r"quality", re.I)
-FIRMWARE_RE = re.compile(r"firmware|\bfw\b|fw\s*rev|revision|\brev\b", re.I)
-UPTIME_RE = re.compile(r"^\s*uptime\b", re.I)
+FIRMWARE_RE = re.compile(r"firmware|fw[\s_]*rev|(?<![a-z])fw(?![a-z])|revision|(?<![a-z])rev(?![a-z])", re.I)
 NET_ERROR_RE = re.compile(r"crc|collision|error|discard|drop|lost|late|align|overrun|underrun|"
                           r"\bfcs\b|miss|fail|reject|timeout|\bbad\b|invalid", re.I)
-VOLATILE_RE = re.compile(r"uptime|\btime\b|date|clock|temperature|\btemp\b", re.I)
+
+
+def leaf(key: str) -> str:
+    """Última parte del nombre: 'EncData/EncRSSI' -> 'EncRSSI'; 'Uptime / Port 1' -> 'Uptime'."""
+    return re.split(r"[/.@]", key.split(" / ")[0])[-1].strip()
+
+
+def is_uptime_key(key: str) -> bool:
+    name = leaf(key).lower()
+    return "uptime" in name and "cum" not in name
+
+
+def is_volatile_key(key: str) -> bool:
+    """Campos que cambian solos (hora, uptime, temperatura): no son 'cambios de información'."""
+    name = leaf(key).lower()
+    return ("uptime" in name or "temp" in name or "timestamp" in name
+            or name.endswith(("time", "date", "clock")))
+
+
 NETWORK_PAGES = ("ethernet_stats", "network_stats")
 REDISCOVER_AFTER_S = 600
 PURGE_EVERY_S = 3600
@@ -65,7 +85,7 @@ class DrivePoller(threading.Thread):
         self.fails = 0
         self.online: bool | None = None
         self._last_num: dict[tuple[str, str], float] = {}
-        self._last_uptime: float | None = None
+        self._last_uptime: dict[str, float] = {}
         self._alerted_low: set[str] = set()
         self._fault_hash: str | None = None
         self._last_discovery = 0.0
@@ -179,8 +199,11 @@ class DrivePoller(threading.Thread):
             for key, (_ts, _v, num) in self.db.latest_values(self.drive.id, page).items():
                 if num is not None:
                     self._last_num[(page, key)] = num
-        up = self.db.get_state(self.drive.id, "last_uptime_s")
-        self._last_uptime = float(up) if up else None
+        try:
+            self._last_uptime = {k: float(v) for k, v in
+                                 json.loads(self.db.get_state(self.drive.id, "last_uptime") or "{}").items()}
+        except (ValueError, TypeError, AttributeError):
+            self._last_uptime = {}
 
     def _comm_ok(self) -> None:
         if self.online is not True:
@@ -258,8 +281,8 @@ class DrivePoller(threading.Thread):
         elif pdef.mode == "periodic":
             self.db.insert_samples(self.drive.id, page, ts, triples)
         else:
-            stable = [(k, v) for k, v in kv if not VOLATILE_RE.search(k)]
-            volatile = [(k, v, n) for k, v, n in triples if VOLATILE_RE.search(k)]
+            stable = [(k, v) for k, v in kv if not is_volatile_key(k)]
+            volatile = [(k, v, n) for k, v, n in triples if is_volatile_key(k)]
             if volatile:
                 self.db.insert_samples(self.drive.id, page, ts, volatile)
             changes = self.db.update_info(self.drive.id, page, stable, ts)
@@ -272,7 +295,8 @@ class DrivePoller(threading.Thread):
                 changes = self.db.update_info(self.drive.id, page, fw, ts, remove_missing=False)
                 self._report_info_changes(page, changes)
 
-        self._check_uptime(triples)
+        if page != "fault_log":  # el Fault Log trae uptimes históricos
+            self._check_uptime(page, triples)
         if page == "encoder":
             self._check_encoder(triples)
         if page in NETWORK_PAGES:
@@ -323,20 +347,28 @@ class DrivePoller(threading.Thread):
         if new:
             self.emit("faults", new=len(new), initial=False)
 
-    def _check_uptime(self, triples) -> None:
-        for k, v, _n in triples:
-            if UPTIME_RE.search(k) and "cumulative" not in k.lower():
-                secs = parse_duration(v)
-                if secs is None:
-                    continue
-                if self._last_uptime is not None and secs + 5 < self._last_uptime:
-                    from .parsers import format_duration
-                    self.event("reboot", "Reinicio del drive detectado",
-                               f"Uptime bajó de {format_duration(self._last_uptime)} a {format_duration(secs)}",
-                               alert=True)
-                self._last_uptime = float(secs)
-                self.db.set_state(self.drive.id, "last_uptime_s", str(secs))
-                return
+    def _check_uptime(self, page: str, triples) -> None:
+        """Reinicio = algún Uptime baja. Se sigue cada campo por separado porque
+        distintas páginas pueden darlo en unidades distintas."""
+        from .parsers import format_duration
+        changed = False
+        for k, v, n in triples:
+            if not is_uptime_key(k):
+                continue
+            secs = parse_duration(v)
+            value = float(secs) if secs is not None else n
+            if value is None:
+                continue
+            key = f"{page}:{k}"
+            prev = self._last_uptime.get(key)
+            if prev is not None and value + 5 < prev:
+                show = format_duration if secs is not None else (lambda x: f"{x:g}")
+                self.event("reboot", "Reinicio del drive detectado",
+                           f"{k} bajó de {show(prev)} a {show(value)}", alert=True)
+            self._last_uptime[key] = value
+            changed = True
+        if changed:
+            self.db.set_state(self.drive.id, "last_uptime", json.dumps(self._last_uptime))
 
     def _check_encoder(self, triples) -> None:
         for k, _v, n in triples:
