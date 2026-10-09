@@ -7,9 +7,9 @@ import sys
 import time
 from pathlib import Path
 
-from PyQt6.QtCore import QSize, Qt, QTimer
+from PyQt6.QtCore import QEvent, QSize, Qt, QTimer
 from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
-from PyQt6.QtWidgets import (QDockWidget, QInputDialog, QLabel, QListWidget, QListWidgetItem, QMainWindow,
+from PyQt6.QtWidgets import (QApplication, QDockWidget, QInputDialog, QLabel, QListWidget, QListWidgetItem, QMainWindow,
                              QMessageBox, QSystemTrayIcon, QTabWidget, QToolBar)
 
 from .. import APP_NAME, __version__, analysis
@@ -125,6 +125,15 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self._tick)
         self.timer.start(2000)
         self._dirty_cards = True
+
+        # Cierre por inactividad: cualquier uso del mouse o teclado reinicia la cuenta.
+        self._last_input = time.monotonic()
+        self._idle_box: QMessageBox | None = None
+        self._idle_left = 0
+        QApplication.instance().installEventFilter(self)
+        self.idle_timer = QTimer(self)
+        self.idle_timer.timeout.connect(self._check_idle)
+        self.idle_timer.start(5000)
 
         self.overview.sync([r["id"] for r in db.drives()])
         self.manager.start_enabled()
@@ -309,8 +318,82 @@ class MainWindow(QMainWindow):
                 self.tabs.setTabText(self.tabs.indexOf(w), r["name"])
             w.refresh(force=force)
 
+    # --- cierre por inactividad ---------------------------------------------
+    _INPUT_EVENTS = {QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove, QEvent.Type.KeyPress,
+                     QEvent.Type.Wheel, QEvent.Type.TouchBegin}
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if event.type() in self._INPUT_EVENTS:
+            self._last_input = time.monotonic()
+            if self._idle_box is not None and obj is not self._idle_box:
+                self._cancel_idle_close()
+        return False
+
+    def _idle_limit_s(self) -> float:
+        try:
+            return max(0.0, float(self.settings.data.get("idle_close_min", 30))) * 60
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _check_idle(self) -> None:
+        limit = self._idle_limit_s()
+        if not limit or self._idle_box is not None:
+            return
+        if time.monotonic() - self._last_input >= limit:
+            self._start_idle_countdown()
+
+    def _start_idle_countdown(self) -> None:
+        log.info("Sin uso durante %.0f min; aviso de cierre", self._idle_limit_s() / 60)
+        self._idle_left = 60
+        box = QMessageBox(QMessageBox.Icon.Warning, "Cerrar por inactividad", "", parent=self)
+        keep = box.addButton("Seguir usando", QMessageBox.ButtonRole.RejectRole)
+        now = box.addButton("Cerrar ahora", QMessageBox.ButtonRole.AcceptRole)
+        keep.clicked.connect(self._cancel_idle_close)
+        now.clicked.connect(lambda: self._idle_close(immediate=True))
+        box.setModal(False)
+        self._idle_box = box
+        self._update_idle_text()
+        box.show()
+        self._bring_front()
+        self.idle_countdown = QTimer(self)
+        self.idle_countdown.timeout.connect(self._idle_step)
+        self.idle_countdown.start(1000)
+
+    def _update_idle_text(self) -> None:
+        if self._idle_box is not None:
+            self._idle_box.setText(f"Nadie ha usado DriveMonitor en {self._idle_limit_s() / 60:g} min.\n\n"
+                                   f"Se detendrán todas las consultas y la app se cerrará en "
+                                   f"{self._idle_left} s.\n\nMueve el mouse o presiona «Seguir usando» para cancelar.")
+
+    def _idle_step(self) -> None:
+        self._idle_left -= 1
+        if self._idle_left <= 0:
+            self._idle_close()
+        else:
+            self._update_idle_text()
+
+    def _cancel_idle_close(self) -> None:
+        if getattr(self, "idle_countdown", None):
+            self.idle_countdown.stop()
+        box, self._idle_box = self._idle_box, None
+        if box is not None:
+            box.hide()
+            box.deleteLater()
+        self._last_input = time.monotonic()
+
+    def _idle_close(self, immediate: bool = False) -> None:
+        log.info("Cierre por inactividad%s", " (confirmado por el usuario)" if immediate else "")
+        if getattr(self, "idle_countdown", None):
+            self.idle_countdown.stop()
+        if self._idle_box is not None:
+            self._idle_box.hide()
+            self._idle_box = None
+        self.close()
+
     def closeEvent(self, e) -> None:  # noqa: N802
         self.timer.stop()
+        self.idle_timer.stop()
+        QApplication.instance().removeEventFilter(self)
         self.statusBar().showMessage("Deteniendo consultas…")
         self.manager.stop_all()
         self.tray.hide()

@@ -58,6 +58,7 @@ DEFAULT_SETTINGS: dict = {
     ],
     "retention_days": {"monitor": 60},  # 0 = sin límite
     "notifications": True,
+    "idle_close_min": 30,         # cerrar la app tras N minutos sin uso (0 = nunca)
     "url_overrides": {},          # {"<ip>": {"fault_log": "http://.../x.html"}}
 }
 

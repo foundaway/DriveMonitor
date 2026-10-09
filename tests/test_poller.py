@@ -149,3 +149,16 @@ def test_unreachable_drive_never_crashes(tmp_path, monkeypatch):
     p.stop()
     p.join(5)
     assert not p.is_alive()
+
+
+def test_reboot_tracked_per_field(tmp_path):
+    """Dos campos de Uptime con unidades distintas no deben confundirse con un reinicio."""
+    settings = Settings(tmp_path / "s.json")
+    db = Database(tmp_path / "t.db")
+    did = db.add_drive("127.0.0.1:9")
+    p = DrivePoller(DriveRef(did, "x", "127.0.0.1:9"), db, settings)
+    p._check_uptime("home", [("Uptime", "1 days, 0 h:00 m:00 s", None), ("Sys/UptimeMs", "90000000", 9e7)])
+    p._check_uptime("home", [("Uptime", "1 days, 0 h:00 m:30 s", None), ("Sys/UptimeMs", "90030000", 9.003e7)])
+    assert "reboot" not in event_kinds(db, did)
+    p._check_uptime("home", [("Uptime", "0 days, 0 h:01 m:00 s", None), ("Sys/UptimeMs", "60000", 6e4)])
+    assert event_kinds(db, did).count("reboot") == 2

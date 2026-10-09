@@ -122,7 +122,12 @@ class SettingsDialog(QDialog):
         self.retention.setSuffix(" días (0 = sin límite)")
         self.notify = QCheckBox("Mostrar notificaciones de Windows")
         self.notify.setChecked(bool(settings.data.get("notifications", True)))
+        self.idle = QSpinBox(minimum=0, maximum=24 * 60)
+        self.idle.setValue(int(settings.data.get("idle_close_min", 30)))
+        self.idle.setSuffix(" min sin uso (0 = nunca)")
+        self.idle.setToolTip("Si nadie usa la app ese tiempo, avisa 60 s y luego detiene todo y se cierra.")
         f4.addRow("Guardar Monitor Signals:", self.retention)
+        f4.addRow("Cerrar la app tras:", self.idle)
         f4.addRow(self.notify)
         page_shift.addWidget(g4)
 
@@ -211,6 +216,7 @@ class SettingsDialog(QDialog):
         d["shifts"] = shifts
         d.setdefault("retention_days", {})["monitor"] = self.retention.value()
         d["notifications"] = self.notify.isChecked()
+        d["idle_close_min"] = self.idle.value()
         d["url_overrides"] = {ip: v for ip, v in self._overrides.items() if v}
         self.settings.save()
         self.accept()

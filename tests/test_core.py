@@ -153,3 +153,29 @@ def test_export_csv_and_xlsx(tmp_path):
     assert export_table(tmp_path / "f.xlsx", ["Hora", "Código", "Texto"], rows) == 2
     ws = openpyxl.load_workbook(tmp_path / "f.xlsx").active
     assert [c.value for c in ws[2]] == rows[0]
+
+
+# --- nombres reales del drive (EncData/EncRSSI, ...) ---------------------------
+
+@pytest.mark.parametrize("key,rssi,quality,fw", [
+    ("EncData/EncRSSI", True, False, False),
+    ("RSSI (%)", True, False, False),
+    ("EncData/EncQualityMonitor", False, True, False),
+    ("EncData/HF2DSLfwrev", False, False, True),
+    ("FW REV", False, False, True),
+    ("Firmware Revision", False, False, True),
+    ("EncData/EncRevolution", False, False, False),
+])
+def test_key_detection_with_real_names(key, rssi, quality, fw):
+    from drivemonitor.poller import FIRMWARE_RE, QUALITY_RE, RSSI_RE
+    assert bool(RSSI_RE.search(key)) == rssi
+    assert bool(QUALITY_RE.search(key)) == quality
+    assert bool(FIRMWARE_RE.search(key)) == fw
+
+
+def test_uptime_and_volatile_keys():
+    from drivemonitor.poller import is_uptime_key, is_volatile_key
+    assert is_uptime_key("Uptime") and is_uptime_key("DriveData/Uptime")
+    assert not is_uptime_key("CumulativeUptime") and not is_uptime_key("X/CumUptime")
+    assert is_volatile_key("EncData/EncTemperature") and is_volatile_key("SystemTime")
+    assert not is_volatile_key("IP Address") and not is_volatile_key("ConnectionTimeout")
